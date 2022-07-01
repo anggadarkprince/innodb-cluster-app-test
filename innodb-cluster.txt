@@ -1,0 +1,101 @@
+## Prepare Server with MySql installed
+- 157.245.196.139 - instance 1
+- 157.245.52.72 - instance 2
+- 206.189.35.68 - instance 3
+
+## Install MySql Shell
+$> sudo apt-get update
+$> sudo apt-get install mysql-shell -- or sudo snap install mysql-shell
+
+## Install MySql Router
+$> sudo apt-get update
+$> sudo apt-get install mysql-router
+
+## Setup Innodb cluster
+-- Start with group replication and create cluster
+-- or, create cluster directly from one of nodes then group replication auto created
+
+
+## Setup server 1
+$> mysqlsh
+mysql-py> \connect root@157.245.196.139  -- or shell.connect("root@157.245.196.139")
+mysql-py> dba.create_cluster("myCluster") -- if current instance is not met requirement of cluster will error and need to configure_instance() first
+
+-- check current server if configurations for cluster are met
+mysql-py> dba.checkInstanceConfiguration()
+
+-- auto fix configuration instance
+mysql-py> dba.configure_instance()
+
+
+## Setup server 2
+-- You can login into server 2 or you can configure from any server
+mysql-py> dba.checkInstanceConfiguration("root@157.245.52.72:3306")
+
+-- auto configure instance
+mysql-py> dba.configure_instance("root@157.245.52.72:3306")
+
+
+## Setup server 3
+-- You can login into server 3 or you can configure from any server
+mysql-py> dba.checkInstanceConfiguration("root@206.189.35.68:3306")
+
+-- auto configure instance
+mysql-py> dba.configure_instance("root@206.189.35.68:3306")
+
+
+## Create new cluster
+-- after configure instances, from any server / instance run mysql shell, for example start from server 1
+mysql-py> var cluster = dba.create_cluster("myCluster")  -- auto add server 1 to cluster, when create cluster fail due to replication configuration, set config manually then repeat
+mysql-py> cluster.add_instance("root@157.245.52.72:3306") -- add server 2 -- when gtid empty or not match select to Clone the data
+mysql-py> cluster.add_instance("root@206.189.35.68:3306") -- add server 3
+mysql-py> cluster.status() -- show status of cluster status
+
+
+## Bootstrap MySql Router
+-- router can live outside the cluster, same server of the client app is recommended, and bootstrap any node of cluster
+$> mysqlrouter --bootstrap root@localhost:3306 --directory /tmp/myrouter --conf-use-sockets --account routerfriend --account-create always
+
+-- if app and router live in other server, then the app must connect to host 157.245.52.72 not the localhost (router) and related port
+$> mysqlrouter --bootstrap root@157.245.52.72:3306 --directory /tmp/myrouter --conf-use-sockets --account routerfriend --account-create always
+
+Output:
+### MySQL Classic protocol
+- Read/Write Connections: localhost:6446, /tmp/myrouter/mysql.sock
+- Read/Only Connections:  localhost:6447, /tmp/myrouter/mysqlro.sock
+
+### MySQL X protocol
+- Read/Write Connections: localhost:6448, /tmp/myrouter/mysqlx.sock
+- Read/Only Connections:  localhost:6449, /tmp/myrouter/mysqlxro.sock
+
+$> cd /tmp/myrouter
+$> ./start.sh
+
+
+## Check router from MySql shell
+mysql-py> \c root@157.245.196.139:6447
+mysql-py> \sql
+mysql-sql> SELECT @@hostname; -- will showing instance handle Read/Only
+
+mysql-sql> \c root@157.245.196.139:6446
+mysql-sql> SELECT @@hostname; -- will showing instance handle Read/Write
+
+## Connect the application
+-- Set connection to mysql router read/write connection
+-- application
+
+
+## Remove instance
+mysql-py> cluster.remove_instance('root@157.245.196.139:3306')
+mysql-py> cluster.status()
+
+## Rejoin instance
+mysql-py> var cluster = dba.get_cluster('myCluster')
+mysql-py> cluster.rejoin_instance('root@157.245.196.139:3306')
+mysql-py> cluster.status()
+
+## Recovering cluster when all member offline
+mysql-py> shell.connect('root@localhost:3310')
+mysql-py> cluster = dba.get_cluster()
+mysql-py> var cluster = dba.reboot_cluster_from_complete_outage()
+mysql-py> cluster.status()
